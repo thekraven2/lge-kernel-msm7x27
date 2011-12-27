@@ -20,19 +20,13 @@
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
 #include <linux/input.h>
-#ifndef CONFIG_LGE_HEADSET
 #include <linux/switch.h>
-#endif
 
 #include <asm/mach-types.h>
 
 #include <mach/msm_rpcrouter.h>
 #include <mach/board.h>
 #include <mach/rpc_server_handset.h>
-
-#ifndef CONFIG_MACH_MSM7X27_ALOHAV
-#include <mach/gpio.h>
-#endif
 
 #define DRIVER_NAME	"msm-handset"
 
@@ -53,6 +47,9 @@
 
 #define HS_PWR_K		0x6F	/* Power key */
 #define HS_END_K		0x51	/* End key or Power key */
+//LGE_SND_UPDATE_S [
+#define HS_HEADSET_K    0x7E
+//LGE_SND_UPDATE_E ]
 #define HS_STEREO_HEADSET_K	0x82
 #define HS_HEADSET_SWITCH_K	0x84
 #define HS_HEADSET_SWITCH_2_K	0xF0
@@ -61,19 +58,11 @@
 #define HS_HEADSET_MICROPHONE_K 0xF7
 #define HS_REL_K		0xFF	/* key release */
 
-#ifndef CONFIG_MACH_MSM7X27_ALOHAV
-/* LGE_CHANGE
- * for hook key
- * 2010-03-03, junyeob.an
- * for deskdock detect from muic
- * 2010-04-19
- */
-#define HS_ON_HOOK_K		0x01	/* headphone hook key */
-#define GPIO_EAR_SENSE_BIAS		0x1D
-#define HS_DESKDOCK_DETECT	0x02	/* deskdock detect */
-#else
 #define SW_HEADPHONE_INSERT_W_MIC 1 /* HS with mic */
-#endif
+
+//LGE_SND_UPDATE_S [
+#define HS_DESKDOCK_DETECT	0x02	/* deskdock detect */
+//LGE_SND_UPDATE_E ]
 
 #define KEY(hs_key, input_key) ((hs_key << 24) | input_key)
 
@@ -204,18 +193,18 @@ struct hs_cmd_data_type {
 static const uint32_t hs_key_map[] = {
 	KEY(HS_PWR_K, KEY_POWER),
 	KEY(HS_END_K, KEY_END),
-#ifndef CONFIG_MACH_MSM7X27_ALOHAV
-	KEY(HS_STEREO_HEADSET_K, SW_HEADPHONE_INSERT),
-	KEY(HS_ON_HOOK_K, KEY_MEDIA),
-	KEY(HS_DESKDOCK_DETECT, KEY_CONNECT),
-#else
+//LGE_SND_UPDATE_S [
+    KEY(HS_HEADSET_K, SW_HEADPHONE_INSERT),
+//LGE_SND_UPDATE_E ]
 	KEY(HS_STEREO_HEADSET_K, SW_HEADPHONE_INSERT_W_MIC),
 	KEY(HS_HEADSET_HEADPHONE_K, SW_HEADPHONE_INSERT),
 	KEY(HS_HEADSET_MICROPHONE_K, SW_MICROPHONE_INSERT),
 	KEY(HS_HEADSET_SWITCH_K, KEY_MEDIA),
 	KEY(HS_HEADSET_SWITCH_2_K, KEY_VOLUMEUP),
 	KEY(HS_HEADSET_SWITCH_3_K, KEY_VOLUMEDOWN),
-#endif
+//LGE_SND_UPDATE_S [
+	KEY(HS_DESKDOCK_DETECT, KEY_CONNECT),
+//LGE_SND_UPDATE_E ]
 	0
 };
 
@@ -242,22 +231,16 @@ static struct hs_subs_rpc_req *hs_subs_req;
 
 struct msm_handset {
 	struct input_dev *ipdev;
-#ifndef CONFIG_LGE_HEADSET
 	struct switch_dev sdev;
-#endif
 	struct msm_handset_platform_data *hs_pdata;
 	bool mic_on, hs_on;
 };
 
 static struct msm_rpc_client *rpc_client;
 static struct msm_handset *hs;
+//LGE_SND_UPDATE_S [
 static void (*deskdock_detect_callback)(int);
-
-#if defined(CONFIG_LGE_DIAGTEST)
-/* LGE_CHANGES_S [woonghee@lge.com] 2010-01-23, [VS740] for key test */
-extern uint8_t if_condition_is_on_key_buffering;
-extern uint8_t lgf_factor_key_test_rsp(char);
-#endif
+//LGE_SND_UPDATE_E ]
 
 static int hs_find_key(uint32_t hscode)
 {
@@ -272,17 +255,6 @@ static int hs_find_key(uint32_t hscode)
 	return -1;
 }
 
- #ifndef CONFIG_LGE_HEADSET
-static void
-report_headset_switch(struct input_dev *dev, int key, int value)
-{
-	struct msm_handset *hs = input_get_drvdata(dev);
-
-	input_report_switch(dev, key, value);
-	switch_set_state(&hs->sdev, value);
-}
-#else
-#if 0
 static void update_state(void)
 {
 	int state;
@@ -298,8 +270,6 @@ static void update_state(void)
 
 	switch_set_state(&hs->sdev, state);
 }
-#endif
-#endif
 
 /*
  * tuple format: (key_code, key_param)
@@ -327,51 +297,14 @@ static void report_hs_key(uint32_t key_code, uint32_t key_parm)
 		key_code = key_parm;
 
 	switch (key) {
-#ifndef CONFIG_MACH_MSM7X27_ALOHAV
-	case KEY_POWER:
-	case KEY_END:
-		input_report_key(hs->ipdev, key, (key_code != HS_REL_K));
-		break;
-	case KEY_MEDIA:
-		if (gpio_get_value(GPIO_EAR_SENSE_BIAS) == 1) {
-			/* LGE_CHANGE
-			 * 2010-03-09, junyoub.an@lge.com To protect from wrong hook key operation
-			 */ 
-			input_report_key(hs->ipdev, key, (key_code != HS_REL_K));
-		}
-		break;
-	case KEY_CONNECT:
-		if (deskdock_detect_callback)
-			deskdock_detect_callback((key_code != HS_REL_K));
-		break;
-	case SW_HEADPHONE_INSERT:
-#ifndef CONFIG_LGE_HEADSET
-		report_headset_switch(hs->ipdev, key, (key_code != HS_REL_K));
-#endif
-#if defined(CONFIG_LGE_DIAGTEST)
-		/* LGE_CHANGES
-		 * [woonghee@lge.com] 2010-01-23
-		 * [VS740] for key test */
-		if(if_condition_is_on_key_buffering == HS_TRUE && key_code == 0/*press*/)
-			lgf_factor_key_test_rsp((uint8_t)key);
-#endif
-		break;
-#else /*CONFIG_MACH_MSM7X27_ALOHAG*/
 	case KEY_POWER:
 	case KEY_END:
 	case KEY_MEDIA:
 	case KEY_VOLUMEUP:
 	case KEY_VOLUMEDOWN:
 		input_report_key(hs->ipdev, key, (key_code != HS_REL_K));
-#if defined(CONFIG_LGE_DIAGTEST)
-		/* LGE_CHANGES
-		 * [woonghee@lge.com] 2010-01-23, 
-		 * [VS740] for key test
-		 */
-		if(if_condition_is_on_key_buffering == HS_TRUE && key_code == 0/*press*/)
-			lgf_factor_key_test_rsp((uint8_t)key);
-#endif
 		break;
+
 	case SW_HEADPHONE_INSERT_W_MIC:
 		hs->mic_on = hs->hs_on = (key_code != HS_REL_K) ? 1 : 0;
 		input_report_switch(hs->ipdev, SW_HEADPHONE_INSERT,
@@ -391,7 +324,12 @@ static void report_hs_key(uint32_t key_code, uint32_t key_parm)
 		input_report_switch(hs->ipdev, key, hs->mic_on);
 		update_state();
 		break;
-#endif /*CONFIG_MACH_MSM7X27_ALOHAG */
+//LGE_SND_UPDATE_S [
+    case KEY_CONNECT:
+        if (deskdock_detect_callback)
+            deskdock_detect_callback((key_code != HS_REL_K));
+		break;
+//LGE_SND_UPDATE_E ]
 	case -1:
 		printk(KERN_ERR "%s: No mapping for remote handset event %d\n",
 				 __func__, temp_key_code);
@@ -513,16 +451,6 @@ void report_headset_status(bool connected)
 		pr_err("%s: couldn't send rpc client request\n", __func__);
 }
 EXPORT_SYMBOL(report_headset_status);
-
-#ifdef CONFIG_MACH_LGE
-void rpc_server_hs_register_callback(void *callback_func)
-{
-	deskdock_detect_callback = (void (*)(int))callback_func;
-
-	return;
-}
-EXPORT_SYMBOL(rpc_server_hs_register_callback);
-#endif
 
 static int hs_rpc_pwr_cmd_arg(struct msm_rpc_client *client,
                     void *buffer, void *data)
@@ -706,7 +634,6 @@ static void __devexit hs_rpc_deinit(void)
 		msm_rpc_unregister_client(rpc_client);
 }
 
-#ifndef CONFIG_LGE_HEADSET
 static ssize_t msm_headset_print_name(struct switch_dev *sdev, char *buf)
 {
 	switch (switch_get_state(&hs->sdev)) {
@@ -717,7 +644,18 @@ static ssize_t msm_headset_print_name(struct switch_dev *sdev, char *buf)
 	}
 	return -EINVAL;
 }
+
+//LGE_SND_UPDATE_S [
+#ifdef CONFIG_MACH_LGE
+void rpc_server_hs_register_callback(void *callback_func)
+{
+    deskdock_detect_callback = (void (*)(int))callback_func;
+    return;
+}
+
+EXPORT_SYMBOL(rpc_server_hs_register_callback);
 #endif
+//LGE_SND_UPDATE_E ]
 
 static int __devinit hs_probe(struct platform_device *pdev)
 {
@@ -728,14 +666,12 @@ static int __devinit hs_probe(struct platform_device *pdev)
 	if (!hs)
 		return -ENOMEM;
 
-#ifndef CONFIG_LGE_HEADSET
 	hs->sdev.name	= "h2w";
 	hs->sdev.print_name = msm_headset_print_name;
 
 	rc = switch_dev_register(&hs->sdev);
 	if (rc)
 		goto err_switch_dev_register;
-#endif
 
 	ipdev = input_allocate_device();
 	if (!ipdev) {
@@ -789,10 +725,8 @@ err_hs_rpc_init:
 err_reg_input_dev:
 	input_free_device(ipdev);
 err_alloc_input_dev:
-#ifndef CONFIG_LGE_HEADSET
 	switch_dev_unregister(&hs->sdev);
 err_switch_dev_register:
-#endif
 	kfree(hs);
 	return rc;
 }
@@ -802,9 +736,7 @@ static int __devexit hs_remove(struct platform_device *pdev)
 	struct msm_handset *hs = platform_get_drvdata(pdev);
 
 	input_unregister_device(hs->ipdev);
-#ifndef CONFIG_LGE_HEADSET
 	switch_dev_unregister(&hs->sdev);
-#endif
 	kfree(hs);
 	hs_rpc_deinit();
 	return 0;
